@@ -1,0 +1,340 @@
+services:
+  auth-postgres:
+    image: postgres:16-alpine
+    container_name: auth-postgres
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: authpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - auth_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authuser -d authdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  customer-postgres:
+    image: postgres:16-alpine
+    container_name: customer-postgres
+    environment:
+      POSTGRES_DB: customerdb
+      POSTGRES_USER: customeruser
+      POSTGRES_PASSWORD: customerpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - customer_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U customeruser -d customerdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  account-postgres:
+    image: postgres:16-alpine
+    container_name: account-postgres
+    environment:
+      POSTGRES_DB: accountdb
+      POSTGRES_USER: accountuser
+      POSTGRES_PASSWORD: accountpass
+    ports:
+      - "5434:5432"
+    volumes:
+      - account_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U accountuser -d accountdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  transaction-postgres:
+    image: postgres:16-alpine
+    container_name: transaction-postgres
+    environment:
+      POSTGRES_DB: transactiondb
+      POSTGRES_USER: transactionuser
+      POSTGRES_PASSWORD: transactionpass
+    ports:
+      - "5435:5432"
+    volumes:
+      - transaction_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U transactionuser -d transactiondb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  notification-postgres:
+    image: postgres:16-alpine
+    container_name: notification-postgres
+    environment:
+      POSTGRES_DB: notificationdb
+      POSTGRES_USER: notificationuser
+      POSTGRES_PASSWORD: notificationpass
+    ports:
+      - "5436:5432"
+    volumes:
+      - notification_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U notificationuser -d notificationdb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  audit-postgres:
+    image: postgres:16-alpine
+    container_name: audit-postgres
+    environment:
+      POSTGRES_DB: auditdb
+      POSTGRES_USER: audituser
+      POSTGRES_PASSWORD: auditpass
+    ports:
+      - "5437:5432"
+    volumes:
+      - audit_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U audituser -d auditdb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    depends_on:
+      - api-gateway
+      - auth-service
+      - customer-service
+      - account-service
+      - transaction-service
+      - notification-service
+      - audit-service
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+  api-gateway:
+    build:
+      context: ./api-gateway/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    depends_on:
+      - redis
+      - auth-service
+      - customer-service
+      - account-service
+      - transaction-service
+      - notification-service
+      - audit-service
+    environment:
+      SPRING_APPLICATION_NAME: api-gateway
+      SERVER_PORT: 8080
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      AUTH_JWT_ISSUER: auth-service
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+    ports:
+      - "8080:8080"
+  auth-service:
+    build:
+      context: ./auth-service/auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: auth-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://auth-postgres:5432/authdb
+      SPRING_DATASOURCE_USERNAME: authuser
+      SPRING_DATASOURCE_PASSWORD: authpass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+      AUTH_JWT_ISSUER: auth-service
+      AUTH_JWT_ACCESS_TTL_SECONDS: "900"
+      AUTH_JWT_REFRESH_TTL_SECONDS: "2592000"
+    ports:
+      - "8082:8080"
+
+  customer-service:
+    build:
+      context: ./customer-service/customer-service
+      dockerfile: Dockerfile
+    container_name: customer-service
+    depends_on:
+      customer-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: customer-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://customer-postgres:5432/customerdb
+      SPRING_DATASOURCE_USERNAME: customeruser
+      SPRING_DATASOURCE_PASSWORD: customerpass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8081:8081"
+
+  account-service:
+    build:
+      context: ./account-service/account-service
+      dockerfile: Dockerfile
+    container_name: account-service
+    depends_on:
+      account-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: account-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://account-postgres:5432/accountdb
+      SPRING_DATASOURCE_USERNAME: accountuser
+      SPRING_DATASOURCE_PASSWORD: accountpass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+    ports:
+      - "8083:8083"
+
+
+  transaction-service:
+    build:
+      context: ./transaction-service/transaction-service
+      dockerfile: Dockerfile
+    container_name: transaction-service
+    depends_on:
+      transaction-postgres:
+        condition: service_healthy
+      account-service:
+        condition: service_started
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: transaction-service
+      TRANSACTION_DB_URL: jdbc:postgresql://transaction-postgres:5432/transactiondb
+      TRANSACTION_DB_USERNAME: transactionuser
+      TRANSACTION_DB_PASSWORD: transactionpass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ACCOUNT_SERVICE_BASE_URL: http://account-service:8083
+    ports:
+      - "8084:8084"
+
+  notification-service:
+    build:
+      context: ./notification-service/notification-service
+      dockerfile: Dockerfile
+    container_name: notification-service
+    depends_on:
+      notification-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: notification-service
+      NOTIFICATION_DB_URL: jdbc:postgresql://notification-postgres:5432/notificationdb
+      NOTIFICATION_DB_USERNAME: notificationuser
+      NOTIFICATION_DB_PASSWORD: notificationpass
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MAIL_HOST: mailhog
+      MAIL_PORT: "1025"
+    ports:
+      - "8085:8085"
+
+  audit-service:
+    build:
+      context: ./audit-service/audit-service
+      dockerfile: Dockerfile
+    container_name: audit-service
+    depends_on:
+      audit-postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: audit-service
+      SERVER_PORT: 8086
+
+      SPRING_DATASOURCE_URL: jdbc:postgresql://audit-postgres:5432/auditdb
+      SPRING_DATASOURCE_USERNAME: audituser
+      SPRING_DATASOURCE_PASSWORD: auditpass
+
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: audit-service
+      SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET: earliest
+
+      AUDIT_TOPICS_USER_REGISTERED: user.registered
+      AUDIT_TOPICS_USER_LOGGED_IN: user-logged-in
+
+      AUDIT_TOPICS_CUSTOMER_CREATED: customer.created
+
+      AUDIT_TOPICS_ACCOUNT_CREATED: account.created
+      AUDIT_TOPICS_ACCOUNT_ACTIVATED: account.activated
+      AUDIT_TOPICS_ACCOUNT_BLOCKED: account.blocked
+      AUDIT_TOPICS_ACCOUNT_DEBITED: account.debited
+      AUDIT_TOPICS_ACCOUNT_CREDITED: account.credited
+
+      AUDIT_TOPICS_TRANSFER_CREATED: transfer.created
+      AUDIT_TOPICS_TRANSFER_COMPLETED: transfer.completed
+      AUDIT_TOPICS_TRANSFER_FAILED: transfer.failed
+    ports:
+      - "8086:8086"
+
+volumes:
+  auth_pgdata:
+  customer_pgdata:
+  account_pgdata:
+  transaction_pgdata:
+  notification_pgdata:
+  audit_pgdata:
+  grafana_data:
