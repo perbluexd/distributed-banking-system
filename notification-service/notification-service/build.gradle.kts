@@ -1,3 +1,5 @@
+import org.gradle.api.file.DuplicatesStrategy
+
 plugins {
 	java
 	id("org.springframework.boot") version "3.5.14"
@@ -41,6 +43,51 @@ dependencies {
 	implementation("io.micrometer:micrometer-registry-prometheus")
 }
 
+sourceSets {
+	create("integrationTest") {
+		java.srcDir("src/integrationTest/java")
+		resources.srcDir("src/integrationTest/resources")
+
+		compileClasspath += sourceSets["main"].output + configurations["testCompileClasspath"]
+		runtimeClasspath += output + compileClasspath + configurations["testRuntimeClasspath"]
+	}
+}
+
+configurations {
+	named("integrationTestImplementation") {
+		extendsFrom(configurations["testImplementation"])
+	}
+	named("integrationTestRuntimeOnly") {
+		extendsFrom(configurations["testRuntimeOnly"])
+	}
+	named("integrationTestCompileOnly") {
+		extendsFrom(configurations["testCompileOnly"])
+	}
+	named("integrationTestAnnotationProcessor") {
+		extendsFrom(configurations["testAnnotationProcessor"])
+	}
+}
+
 tasks.withType<Test> {
 	useJUnitPlatform()
+}
+
+val integrationTest by tasks.registering(Test::class) {
+	description = "Runs integration tests."
+	group = "verification"
+
+	testClassesDirs = sourceSets["integrationTest"].output.classesDirs
+	classpath = sourceSets["integrationTest"].runtimeClasspath
+
+	shouldRunAfter(tasks.test)
+
+	useJUnitPlatform()
+}
+
+tasks.named<ProcessResources>("processIntegrationTestResources") {
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.check {
+	dependsOn(integrationTest)
 }
