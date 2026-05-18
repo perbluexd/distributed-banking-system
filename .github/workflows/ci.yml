@@ -43,11 +43,13 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.service }}
         env:
-          AUTH_JWT_SECRET: 1234567890123456789012345678901234567890123456789012345678901234
+          AUTH_JWT_SECRET: "9f4b2d8e1c7a5f9e3b6d2c1a8e4f7b9d6c3a1e5f8b2d4c7a9e6f1b3d5c8a2e4"
+          AUTH_JWT_ISSUER: "auth-service"
         run: gradle test --no-daemon
 
       - name: Build application
         working-directory: ${{ matrix.service }}
         env:
-          AUTH_JWT_SECRET: 1234567890123456789012345678901234567890123456789012345678901234
+          AUTH_JWT_SECRET: "9f4b2d8e1c7a5f9e3b6d2c1a8e4f7b9d6c3a1e5f8b2d4c7a9e6f1b3d5c8a2e4"
+          AUTH_JWT_ISSUER: "auth-service"
         run: gradle bootJar --no-daemon
