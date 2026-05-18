@@ -42,8 +42,12 @@ jobs:
 
       - name: Run tests
         working-directory: ${{ matrix.service }}
+        env:
+          AUTH_JWT_SECRET: 1234567890123456789012345678901234567890123456789012345678901234
         run: gradle test --no-daemon
 
       - name: Build application
         working-directory: ${{ matrix.service }}
+        env:
+          AUTH_JWT_SECRET: 1234567890123456789012345678901234567890123456789012345678901234
         run: gradle bootJar --no-daemon
